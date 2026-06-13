@@ -63,9 +63,9 @@ def login(client: Client, username: str, password: str) -> dict | None:
     user = db.get_user_by_credentials(client, username, password)
 
     if user:
-        if not user["is_verified"]:
-            # Account exists but email not verified
-            return {"error": "email_not_verified", "user_id": user["id"]}
+        if not user.get("is_active", True):
+            db.log_action(client, "LOGIN_FAILED", f"Disabled account login attempt: '{username}'", status="FAILED")
+            return {"error": "account_disabled"}
         db.log_action(client, "LOGIN", f"User '{username}' logged in")
         return user
 
@@ -86,11 +86,9 @@ def signup(client: Client, username: str, full_name: str, email: str, password: 
         return {"error": "password_too_short"}
 
     user_id = db.create_user(client, username, full_name, email, password)
-    token = generate_verification_token(user_id)
-    store_verification_token(client, user_id, token)
     db.log_action(client, "SIGNUP", f"New user '{username}' registered", session_id=user_id)
 
-    return {"user_id": user_id, "token": token}
+    return {"user_id": user_id}
 
 
 def change_password(client: Client, user_id: str, old_password: str, new_password: str) -> dict:

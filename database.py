@@ -85,7 +85,7 @@ def create_user(db: Client, username: str, full_name: str, email: str, password:
         "email": email.strip().lower(),
         "password": hash_password(password),
         "is_admin": False,
-        "is_verified": False,
+        "is_verified": True,
     }).execute()
     return response.data[0]["id"]
 
@@ -243,3 +243,116 @@ def get_all_threats(db: Client, limit: int = 500) -> list:
         "*, uploads(filename, log_type), sessions(user_id)"
     ).order("created_at", desc=True).limit(limit).execute()
     return response.data
+
+
+# ---------------------------------------------------------------------------
+# Admin — platform stats
+# ---------------------------------------------------------------------------
+
+def get_platform_stats(db: Client) -> dict:
+    """Returns platform-wide stats for admin overview."""
+    users     = db.table("users").select("id", count="exact").execute()
+    uploads   = db.table("uploads").select("id", count="exact").execute()
+    sessions  = db.table("sessions").select("session_id", count="exact").execute()
+    audit     = db.table("audit_log").select("id", count="exact").execute()
+    return {
+        "total_users":   users.count or 0,
+        "total_uploads": uploads.count or 0,
+        "total_sessions": sessions.count or 0,
+        "total_audit":   audit.count or 0,
+    }
+
+
+def get_recent_signups(db: Client, limit: int = 5) -> list:
+    """Returns the most recently registered users."""
+    response = db.table("users").select(
+        "id, username, full_name, email, is_verified, is_active, created_at"
+    ).order("created_at", desc=True).limit(limit).execute()
+    return response.data
+
+
+def get_signups_over_time(db: Client) -> list:
+    """Returns all users with their created_at for charting signups over time."""
+    response = db.table("users").select("created_at").order("created_at").execute()
+    return response.data
+
+
+def get_top_audit_actions(db: Client) -> list:
+    """Returns audit log entries for charting top action types."""
+    response = db.table("audit_log").select("action").execute()
+    return response.data
+
+
+# ---------------------------------------------------------------------------
+# Admin — user management
+# ---------------------------------------------------------------------------
+
+def toggle_user_active(db: Client, user_id: str, is_active: bool):
+    """Enable or disable a user account."""
+    db.table("users").update({"is_active": is_active}).eq("id", user_id).execute()
+
+
+def get_all_users_detailed(db: Client) -> list:
+    """Returns all users with full details for admin panel."""
+    response = db.table("users").select(
+        "id, username, full_name, email, is_admin, is_verified, is_active, created_at"
+    ).order("created_at", desc=True).execute()
+    return response.data
+
+
+def export_users_csv_data(db: Client) -> list:
+    """Returns user data for CSV export."""
+    response = db.table("users").select(
+        "username, full_name, email, is_admin, is_verified, is_active, created_at"
+    ).order("created_at", desc=True).execute()
+    return response.data
+
+
+# ---------------------------------------------------------------------------
+# Admin — broadcast messages
+# ---------------------------------------------------------------------------
+
+def create_broadcast(db: Client, message: str, created_by: str):
+    """Creates a new broadcast message shown to all users."""
+    db.table("broadcast_messages").insert({
+        "message": message,
+        "created_by": created_by,
+        "is_active": True,
+    }).execute()
+
+
+def get_active_broadcast(db: Client):
+    """Returns the latest active broadcast message, if any."""
+    response = db.table("broadcast_messages").select("*").eq(
+        "is_active", True
+    ).order("created_at", desc=True).limit(1).execute()
+    return response.data[0] if response.data else None
+
+
+def deactivate_broadcast(db: Client, message_id: str):
+    """Deactivates a broadcast message so it no longer shows."""
+    db.table("broadcast_messages").update({"is_active": False}).eq(
+        "id", message_id
+    ).execute()
+
+
+# ---------------------------------------------------------------------------
+# Admin — login attempt monitoring
+# ---------------------------------------------------------------------------
+
+def get_failed_logins(db: Client, limit: int = 20) -> list:
+    """Returns recent failed login attempts from the audit log."""
+    response = db.table("audit_log").select("*").eq(
+        "action", "LOGIN_FAILED"
+    ).order("logged_at", desc=True).limit(limit).execute()
+    return response.data
+
+
+def get_login_attempt_stats(db: Client) -> dict:
+    """Returns counts of successful vs failed logins."""
+    success = db.table("audit_log").select("id", count="exact").eq("action", "LOGIN").execute()
+    failed  = db.table("audit_log").select("id", count="exact").eq("action", "LOGIN_FAILED").execute()
+    return {
+        "successful": success.count or 0,
+        "failed":     failed.count or 0,
+    }
